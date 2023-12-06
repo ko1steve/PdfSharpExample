@@ -37,6 +37,7 @@ namespace PdfSharpExample
 
             double borderX = Double.Parse(ConfigurationManager.AppSettings["PAGE_BORDER_X"]);
             double borderY = Double.Parse(ConfigurationManager.AppSettings["PAGE_BORDER_Y"]);
+            double pEndX = page.Width - borderX * 2;
             double pEndY = page.Height - borderY * 2;
 
             double pStartX = borderX;
@@ -46,23 +47,62 @@ namespace PdfSharpExample
             {
                 while (!reader.EndOfStream)
                 {
-                    string line = reader.ReadLine();
-                    XSize textSize = gfx.MeasureString(line, font);
-                    //* 當文字超過頁高，新增一頁
-                    //* 當文字超過頁高，新增一頁
-                    if (pStartY + textSize.Height > pEndY)
-                    {
-                        page = document.AddPage();
-                        gfx = XGraphics.FromPdfPage(page);
-                        textFormatter = new XTextFormatter(gfx);
-                        pStartY = borderY;
+                    List<string> textList = new List<string> { reader.ReadLine() };
+                    while (textList.Count() > 0) {
+                        string line = textList.First();
+                        textList.RemoveAt(0);
+                        XSize textSize = gfx.MeasureString(line, font);
+
+                        //* 當文字超過頁高，新增一頁
+                        if (pStartY + textSize.Height > pEndY)
+                        {
+                            page = document.AddPage();
+                            gfx = XGraphics.FromPdfPage(page);
+                            textFormatter = new XTextFormatter(gfx);
+                            pStartY = borderY;
+                        }
+
+                        //* 當文字超過頁寬，進行裁剪後再繪製，剪裁後剩餘的文字加入 List 最頂部
+                        if (pStartX + textSize.Width > pEndX)
+                        {
+                            /* 首先會測量 5 個字元長度有沒有超過頁寬，若沒有則測量 10 個、15 個、20 個... 的情況
+                             * 一旦超過，則將測量長度減去 offset 個字元單位
+                             * 再以這個長度為基準，加上遞減後的 offet 個字元長度 (4、3、2、1) 做測量
+                             * 直到 offet 遞減至 0，獲得的長度即為要剪裁的文字長度
+                             **/
+                            int offset = 5;
+                            int subLineLength = offset;
+                            string subLine = line.Substring(0, subLineLength);
+                            textSize = gfx.MeasureString(subLine, font);
+                            while (offset > 0)
+                            {
+                                while (pStartX + textSize.Width <= pEndX && subLine.Length + offset <= line.Length)
+                                {
+                                    subLineLength += offset;
+                                    subLine = line.Substring(0, subLineLength);
+                                    textSize = gfx.MeasureString(subLine, font);
+                                }
+                                subLineLength -= offset;
+                                offset--;
+                                subLine = line.Substring(0, subLineLength);
+                                textSize = gfx.MeasureString(subLine, font);
+                            }
+                            string leftover = line.Substring(subLineLength);
+                            textList.Insert(0, leftover);
+                            XRect rect = new XRect(pStartX, pStartY, gfx.PageSize.Width - borderX, textSize.Height);
+                            textFormatter.DrawString(subLine, font, XBrushes.Black, rect);
+                            pStartY += textSize.Height;
+                        }
+                        else
+                        {
+                            XRect rect = new XRect(pStartX, pStartY, gfx.PageSize.Width - borderX, textSize.Height);
+                            textFormatter.DrawString(line, font, XBrushes.Black, rect);
+                            pStartY += textSize.Height;
+
+                        }
                     }
-                    XRect rect = new XRect(pStartX, pStartY, gfx.PageSize.Width-borderX, textSize.Height);
-                    textFormatter.DrawString(line, font, XBrushes.Black, rect);
-                    pStartY += textSize.Height;
                 }
             }
-
             string pdfFileDir = ConfigurationManager.AppSettings["PDF_FILE_DIR"];
             string pdfFileName = ConfigurationManager.AppSettings["PDF_FILE_NAME"];
             string pdfFilePath = pdfFileDir + "\\" + pdfFileName;
